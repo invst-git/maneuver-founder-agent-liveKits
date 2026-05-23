@@ -8,6 +8,19 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+BUSINESS_CONTEXT_FIELDS = (
+    "problem",
+    "current_workflow",
+    "current_tools",
+    "desired_solution",
+    "timeline",
+    "budget",
+    "decision_maker",
+    "success_metric",
+    "next_step",
+)
+
+
 @dataclass
 class LeadProfile:
     lead_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -60,20 +73,36 @@ class LeadProfile:
             self.notes.append(note)
             self.updated_at = utc_now_iso()
 
-    def add_transcript_item(self, role: str, text: str, interrupted: bool = False) -> None:
+    def add_transcript_item(
+        self,
+        role: str,
+        text: str,
+        interrupted: bool = False,
+    ) -> dict[str, Any] | None:
         text = text.strip()
         if not text:
-            return
+            return None
 
-        self.transcript.append(
-            {
-                "timestamp": utc_now_iso(),
-                "role": role,
-                "text": text,
-                "interrupted": interrupted,
-            }
-        )
+        item = {
+            "timestamp": utc_now_iso(),
+            "role": role,
+            "text": text,
+            "interrupted": interrupted,
+        }
+
+        self.transcript.append(item)
         self.updated_at = utc_now_iso()
+
+        return item
+
+    def has_business_context(self) -> bool:
+        return any(bool(getattr(self, field_name)) for field_name in BUSINESS_CONTEXT_FIELDS)
+
+    def is_persistable(self) -> bool:
+        if self.email or self.phone or self.company or self.website:
+            return True
+
+        return bool(self.name and self.has_business_context())
 
     def compute_qualification(self) -> str:
         strong_signals = 0
@@ -100,3 +129,8 @@ class LeadProfile:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def to_lead_record(self) -> dict[str, Any]:
+        record = asdict(self)
+        record.pop("transcript", None)
+        return record

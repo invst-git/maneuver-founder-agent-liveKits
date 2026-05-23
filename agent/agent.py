@@ -92,12 +92,19 @@ class ManeuverFounderAgent(Agent):
         if note:
             self.lead.add_note(note)
 
-        self.store.persist(self.lead.to_dict(), event="capture_lead_info")
+        saved = False
+        reason = "missing_contact_or_company_signal"
+
+        if self.lead.is_persistable():
+            self.store.upsert_lead(self.lead.to_lead_record(), event="capture_lead_info")
+            saved = True
+            reason = "lead_record_saved"
 
         return {
-            "saved": True,
+            "saved": saved,
             "lead_id": self.lead.lead_id,
             "qualification": self.lead.qualification,
+            "reason": reason,
         }
 
     @function_tool()
@@ -114,8 +121,17 @@ class ManeuverFounderAgent(Agent):
 
         context.disallow_interruptions()
 
+        if not self.lead.is_persistable():
+            return {
+                "saved": False,
+                "lead_id": self.lead.lead_id,
+                "qualification": self.lead.qualification,
+                "reason": "missing_contact_or_company_signal",
+                "message": "Lead profile needs a contact or company signal before it can be saved.",
+            }
+
         self.lead.add_note(f"Lead saved. Reason: {reason}")
-        self.store.persist(self.lead.to_dict(), event="save_lead")
+        self.store.upsert_lead(self.lead.to_lead_record(), event="save_lead")
 
         return {
             "saved": True,
@@ -128,10 +144,15 @@ class ManeuverFounderAgent(Agent):
 @server.rtc_session(agent_name=settings.agent_name)
 async def maneuver_agent(ctx: agents.JobContext):
     lead = LeadProfile()
-    store = LeadStore(settings.leads_file)
+    store = LeadStore(
+        settings.leads_file,
+        transcript_file_path=settings.transcripts_file,
+        transcript_debug_enabled=settings.transcript_debug_enabled,
+    )
 
     async def save_on_shutdown():
-        store.persist(lead.to_dict(), event="session_shutdown")
+        if lead.is_persistable():
+            store.upsert_lead(lead.to_lead_record(), event="session_shutdown")
 
     ctx.add_shutdown_callback(save_on_shutdown)
 
@@ -155,13 +176,14 @@ async def maneuver_agent(ctx: agents.JobContext):
         text = event.item.text_content or ""
         interrupted = bool(getattr(event.item, "interrupted", False))
 
-        lead.add_transcript_item(
+        transcript_item = lead.add_transcript_item(
             role=role,
             text=text,
             interrupted=interrupted,
         )
 
-        store.persist(lead.to_dict(), event="conversation_item_added")
+        if transcript_item:
+            store.append_transcript_event(lead.lead_id, transcript_item)
 
     await session.start(
         room=ctx.room,
