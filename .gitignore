@@ -13,14 +13,9 @@ web/.env.*
 *.p12
 *.pfx
 secrets/
+agent/tests
 credentials/
 service-account*.json
-data/leads.jsonl
-data/leads*.jsonl
-data/transcripts/
-data/recordings/
-data/sessions/
-data/uploads/
 !data/.gitkeep
 logs/
 *.log

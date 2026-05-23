@@ -7,9 +7,9 @@ from livekit.agents import (
     Agent,
     AgentSession,
     AgentServer,
+    AgentStateChangedEvent,
     ConversationItemAddedEvent,
     RunContext,
-    TurnHandlingOptions,
     function_tool,
 )
 from livekit.agents.llm import ChatMessage
@@ -17,9 +17,12 @@ from livekit.plugins import silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from src.config import get_settings
+from src.call_control import EndCallManager, LiveKitRoomCloser
 from src.lead_capture import LeadProfile
 from src.lead_store import LeadStore
 from src.prompts import FOUNDER_AGENT_PROMPT, OPENING_GREETING
+from src.ui_bridge import ManeuverUiBridge, clean_lead_field_updates, normalize_lead_field
+from src.voice_config import build_tts, build_tts_text_transforms, build_turn_handling
 
 
 load_dotenv(".env.local")
@@ -29,9 +32,17 @@ server = AgentServer()
 
 
 class ManeuverFounderAgent(Agent):
-    def __init__(self, lead: LeadProfile, store: LeadStore):
+    def __init__(
+        self,
+        lead: LeadProfile,
+        store: LeadStore,
+        ui_bridge: ManeuverUiBridge,
+        end_call_manager: EndCallManager,
+    ):
         self.lead = lead
         self.store = store
+        self.ui_bridge = ui_bridge
+        self.end_call_manager = end_call_manager
 
         super().__init__(
             instructions=FOUNDER_AGENT_PROMPT,
@@ -68,29 +79,36 @@ class ManeuverFounderAgent(Agent):
         Do not use this for random small talk.
         """
 
+        lead_fields = {
+            "name": name,
+            "role": role,
+            "company": company,
+            "website": website,
+            "email": email,
+            "phone": phone,
+            "location": location,
+            "industry": industry,
+            "company_size": company_size,
+            "problem": problem,
+            "current_workflow": current_workflow,
+            "current_tools": current_tools,
+            "desired_solution": desired_solution,
+            "timeline": timeline,
+            "budget": budget,
+            "decision_maker": decision_maker,
+            "success_metric": success_metric,
+            "next_step": next_step,
+        }
+        ui_updates = clean_lead_field_updates(lead_fields)
+
         self.lead.update(
-            name=name,
-            role=role,
-            company=company,
-            website=website,
-            email=email,
-            phone=phone,
-            location=location,
-            industry=industry,
-            company_size=company_size,
-            problem=problem,
-            current_workflow=current_workflow,
-            current_tools=current_tools,
-            desired_solution=desired_solution,
-            timeline=timeline,
-            budget=budget,
-            decision_maker=decision_maker,
-            success_metric=success_metric,
-            next_step=next_step,
+            **lead_fields,
         )
 
         if note:
             self.lead.add_note(note)
+
+        await self.ui_bridge.update_lead_fields(ui_updates)
 
         saved = False
         reason = "missing_contact_or_company_signal"
@@ -106,6 +124,77 @@ class ManeuverFounderAgent(Agent):
             "qualification": self.lead.qualification,
             "reason": reason,
         }
+
+    @function_tool()
+    async def update_lead_field(
+        self,
+        context: RunContext,
+        field: str,
+        value: str,
+    ) -> dict:
+        """Capture one discovery field and update the frontend side panel.
+
+        Prefer capture_lead_info when the visitor provides multiple useful details.
+        """
+
+        canonical_field = normalize_lead_field(field)
+        if canonical_field is None:
+            return {
+                "saved": False,
+                "sent": False,
+                "reason": "invalid_field",
+            }
+
+        updates = clean_lead_field_updates({canonical_field: value})
+        if not updates:
+            return {
+                "saved": False,
+                "sent": False,
+                "reason": "empty_value",
+            }
+
+        self.lead.update(**updates)
+        ui_result = await self.ui_bridge.update_lead_field(canonical_field, updates[canonical_field])
+
+        saved = False
+        reason = "missing_contact_or_company_signal"
+
+        if self.lead.is_persistable():
+            self.store.upsert_lead(self.lead.to_lead_record(), event="update_lead_field")
+            saved = True
+            reason = "lead_record_saved"
+
+        return {
+            "saved": saved,
+            "sent": ui_result.get("sent", False),
+            "lead_id": self.lead.lead_id,
+            "qualification": self.lead.qualification,
+            "reason": reason,
+        }
+
+    @function_tool()
+    async def show_services_slide(self, context: RunContext) -> dict:
+        """Show Maneuver's services on the frontend before answering service-list questions."""
+
+        return await self.ui_bridge.show_services_slide()
+
+    @function_tool()
+    async def show_service_detail(self, context: RunContext, service_name: str) -> dict:
+        """Zoom the frontend into a specific Maneuver service."""
+
+        return await self.ui_bridge.show_service_detail(service_name)
+
+    @function_tool()
+    async def show_process_diagram(self, context: RunContext) -> dict:
+        """Show Maneuver's process diagram on the frontend before answering process questions."""
+
+        return await self.ui_bridge.show_process_diagram()
+
+    @function_tool()
+    async def show_default_view(self, context: RunContext) -> dict:
+        """Reset the frontend visual panel to the default call view."""
+
+        return await self.ui_bridge.show_default_view()
 
     @function_tool()
     async def save_lead(
@@ -140,6 +229,35 @@ class ManeuverFounderAgent(Agent):
             "message": "Lead profile saved successfully.",
         }
 
+    @function_tool()
+    async def end_call(
+        self,
+        context: RunContext,
+        reason: str = "customer_requested_end_call",
+    ) -> dict:
+        """End the call after a short goodbye.
+
+        Use this when the visitor clearly wants to leave, says goodbye, says
+        they are done, asks to end the call, or says they have no more questions.
+        """
+
+        context.disallow_interruptions()
+
+        saved = False
+        if self.lead.is_persistable():
+            self.lead.add_note(f"Call ended by customer intent. Reason: {reason}")
+            self.store.upsert_lead(self.lead.to_lead_record(), event="end_call")
+            saved = True
+
+        end_state = self.end_call_manager.request_end_call(reason)
+
+        return {
+            **end_state,
+            "saved": saved,
+            "lead_id": self.lead.lead_id,
+            "qualification": self.lead.qualification,
+        }
+
 
 @server.rtc_session(agent_name=settings.agent_name)
 async def maneuver_agent(ctx: agents.JobContext):
@@ -148,6 +266,13 @@ async def maneuver_agent(ctx: agents.JobContext):
         settings.leads_file,
         transcript_file_path=settings.transcripts_file,
         transcript_debug_enabled=settings.transcript_debug_enabled,
+    )
+    ui_bridge = ManeuverUiBridge(ctx.room)
+    end_call_manager = EndCallManager(
+        LiveKitRoomCloser(
+            settings=settings,
+            room_name=ctx.job.room.name,
+        )
     )
 
     async def save_on_shutdown():
@@ -159,12 +284,11 @@ async def maneuver_agent(ctx: agents.JobContext):
     session = AgentSession(
         stt="deepgram/nova-3:multi",
         llm="openai/gpt-4.1-mini",
-        tts="cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+        tts=build_tts(settings),
         vad=silero.VAD.load(),
-        turn_handling=TurnHandlingOptions(
-            turn_detection=MultilingualModel(),
-        ),
+        turn_handling=build_turn_handling(turn_detection=MultilingualModel()),
         use_tts_aligned_transcript=True,
+        tts_text_transforms=build_tts_text_transforms(),
     )
 
     @session.on("conversation_item_added")
@@ -185,9 +309,18 @@ async def maneuver_agent(ctx: agents.JobContext):
         if transcript_item:
             store.append_transcript_event(lead.lead_id, transcript_item)
 
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(event: AgentStateChangedEvent):
+        end_call_manager.observe_agent_state(event.new_state)
+
     await session.start(
         room=ctx.room,
-        agent=ManeuverFounderAgent(lead=lead, store=store),
+        agent=ManeuverFounderAgent(
+            lead=lead,
+            store=store,
+            ui_bridge=ui_bridge,
+            end_call_manager=end_call_manager,
+        ),
     )
 
     await session.generate_reply(

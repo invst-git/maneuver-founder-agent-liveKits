@@ -9,6 +9,8 @@ import {
   type AgentControlBarControls,
 } from '@/components/agents-ui/agent-control-bar';
 import { Shimmer } from '@/components/ai-elements/shimmer';
+import { ConversationVisualPanel } from '@/components/app/conversation-ui/conversation-visual-panel';
+import { useConversationUi } from '@/components/app/conversation-ui/use-conversation-ui';
 import { cn } from '@/lib/shadcn/utils';
 import { TileLayout } from './tile-view';
 
@@ -180,6 +182,7 @@ export function AgentSessionView_01({
   const [chatOpen, setChatOpen] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { state: agentState } = useAgent();
+  const { state: conversationUiState } = useConversationUi();
 
   const controls: AgentControlBarControls = {
     leave: true,
@@ -201,74 +204,84 @@ export function AgentSessionView_01({
   return (
     <section
       ref={ref}
-      className={cn('bg-background relative z-10 h-full w-full overflow-hidden', className)}
+      className={cn(
+        'bg-background relative z-10 grid h-full w-full grid-rows-[minmax(390px,1fr)_minmax(220px,38%)] overflow-hidden md:grid-cols-[minmax(0,1fr)_minmax(360px,430px)] md:grid-rows-none',
+        className
+      )}
       {...props}
     >
-      <Fade top className="absolute inset-x-4 top-0 z-10 h-40" />
-      {/* transcript */}
+      <div className="relative min-h-0 overflow-hidden">
+        <Fade top className="absolute inset-x-4 top-0 z-10 h-40" />
+        {/* transcript */}
 
-      <div className="absolute top-0 bottom-[135px] flex w-full flex-col md:bottom-[170px]">
-        <AnimatePresence>
-          {chatOpen && (
-            <motion.div
-              {...CHAT_MOTION_PROPS}
-              className="flex h-full w-full flex-col gap-4 space-y-3 transition-opacity duration-300 ease-out"
-            >
-              <AgentChatTranscript
-                agentState={agentState}
-                messages={messages}
-                className="mx-auto w-full max-w-2xl [&_.is-user>div]:rounded-[22px] [&>div>div]:px-4 [&>div>div]:pt-40 md:[&>div>div]:px-6"
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-      {/* Tile layout */}
-      <TileLayout
-        chatOpen={chatOpen}
-        audioVisualizerType={audioVisualizerType}
-        audioVisualizerColor={audioVisualizerColor}
-        audioVisualizerColorShift={audioVisualizerColorShift}
-        audioVisualizerBarCount={audioVisualizerBarCount}
-        audioVisualizerRadialBarCount={audioVisualizerRadialBarCount}
-        audioVisualizerRadialRadius={audioVisualizerRadialRadius}
-        audioVisualizerGridRowCount={audioVisualizerGridRowCount}
-        audioVisualizerGridColumnCount={audioVisualizerGridColumnCount}
-        audioVisualizerWaveLineWidth={audioVisualizerWaveLineWidth}
-      />
-      {/* Bottom */}
-      <motion.div
-        {...BOTTOM_VIEW_MOTION_PROPS}
-        className="absolute inset-x-3 bottom-0 z-50 md:inset-x-12"
-      >
-        {/* Pre-connect message */}
-        {isPreConnectBufferEnabled && (
+        <div className="absolute top-0 bottom-[135px] flex w-full flex-col md:bottom-[170px]">
           <AnimatePresence>
-            {messages.length === 0 && (
-              <MotionMessage
-                key="pre-connect-message"
-                duration={2}
-                aria-hidden={messages.length > 0}
-                {...SHIMMER_MOTION_PROPS}
-                className="pointer-events-none mx-auto block w-full max-w-2xl pb-4 text-center text-sm font-semibold"
+            {chatOpen && (
+              <motion.div
+                {...CHAT_MOTION_PROPS}
+                className="flex h-full w-full flex-col gap-4 space-y-3 transition-opacity duration-300 ease-out"
               >
-                {preConnectMessage}
-              </MotionMessage>
+                <AgentChatTranscript
+                  agentState={agentState}
+                  messages={messages}
+                  className="mx-auto w-full max-w-2xl [&_.is-user>div]:rounded-[22px] [&>div>div]:px-4 [&>div>div]:pt-40 md:[&>div>div]:px-6"
+                />
+              </motion.div>
             )}
           </AnimatePresence>
-        )}
-        <div className="bg-background relative mx-auto max-w-2xl pb-3 md:pb-12">
-          <Fade bottom className="absolute inset-x-0 top-0 h-4 -translate-y-full" />
-          <AgentControlBar
-            variant="livekit"
-            controls={controls}
-            isChatOpen={chatOpen}
-            isConnected={session.isConnected}
-            onDisconnect={session.end}
-            onIsChatOpenChange={setChatOpen}
-          />
         </div>
-      </motion.div>
+        {/* Tile layout */}
+        <TileLayout
+          chatOpen={chatOpen}
+          audioVisualizerType={audioVisualizerType}
+          audioVisualizerColor={audioVisualizerColor}
+          audioVisualizerColorShift={audioVisualizerColorShift}
+          audioVisualizerBarCount={audioVisualizerBarCount}
+          audioVisualizerRadialBarCount={audioVisualizerRadialBarCount}
+          audioVisualizerRadialRadius={audioVisualizerRadialRadius}
+          audioVisualizerGridRowCount={audioVisualizerGridRowCount}
+          audioVisualizerGridColumnCount={audioVisualizerGridColumnCount}
+          audioVisualizerWaveLineWidth={audioVisualizerWaveLineWidth}
+        />
+        {/* Bottom */}
+        <motion.div
+          {...BOTTOM_VIEW_MOTION_PROPS}
+          className="absolute inset-x-3 bottom-0 z-50 md:inset-x-12"
+        >
+          {/* Pre-connect message */}
+          {isPreConnectBufferEnabled && (
+            <AnimatePresence>
+              {messages.length === 0 && (
+                <MotionMessage
+                  key="pre-connect-message"
+                  duration={2}
+                  aria-hidden={messages.length > 0}
+                  {...SHIMMER_MOTION_PROPS}
+                  className="pointer-events-none mx-auto block w-full max-w-2xl pb-4 text-center text-sm font-semibold"
+                >
+                  {preConnectMessage}
+                </MotionMessage>
+              )}
+            </AnimatePresence>
+          )}
+          <div className="bg-background relative mx-auto max-w-2xl pb-3 md:pb-12">
+            <Fade bottom className="absolute inset-x-0 top-0 h-4 -translate-y-full" />
+            <AgentControlBar
+              variant="livekit"
+              controls={controls}
+              isChatOpen={chatOpen}
+              isConnected={session.isConnected}
+              onDisconnect={session.end}
+              onIsChatOpenChange={setChatOpen}
+            />
+          </div>
+        </motion.div>
+      </div>
+
+      <ConversationVisualPanel
+        state={conversationUiState}
+        className="min-h-0 border-t md:border-t-0 md:border-l"
+      />
     </section>
   );
 }
