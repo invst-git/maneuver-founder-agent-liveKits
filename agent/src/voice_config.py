@@ -10,7 +10,7 @@ def build_tts_extra_kwargs(settings: Settings) -> dict[str, Any]:
     extra_kwargs: dict[str, Any] = {
         "speed": settings.tts_speed,
         "volume": settings.tts_volume,
-        "add_timestamps": True,
+        "add_timestamps": False,
     }
 
     if settings.tts_emotion:
@@ -39,14 +39,14 @@ def build_turn_handling(turn_detection: Any | None = None) -> TurnHandlingOption
         },
         interruption={
             "enabled": True,
-            "min_duration": 0.75,
+            "min_duration": 0.35,
             "min_words": 1,
-            "resume_false_interruption": True,
-            "false_interruption_timeout": 1.4,
+            "resume_false_interruption": False,
+            "false_interruption_timeout": 0.8,
         },
         preemptive_generation={
             "enabled": True,
-            "preemptive_tts": False,
+            "preemptive_tts": True,
         },
     )
 

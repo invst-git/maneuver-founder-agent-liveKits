@@ -48,6 +48,7 @@ class LeadProfile:
     next_step: str | None = None
 
     qualification: str = "unknown"
+    field_statuses: dict[str, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     transcript: list[dict[str, Any]] = field(default_factory=list)
 
@@ -71,6 +72,11 @@ class LeadProfile:
         note = note.strip()
         if note:
             self.notes.append(note)
+            self.updated_at = utc_now_iso()
+
+    def set_field_status(self, field_name: str, status: str) -> None:
+        if hasattr(self, field_name):
+            self.field_statuses[field_name] = status
             self.updated_at = utc_now_iso()
 
     def add_transcript_item(

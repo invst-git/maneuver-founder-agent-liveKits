@@ -2,7 +2,9 @@ from collections.abc import AsyncIterable
 import re
 
 
-TAIL_CHARS = 64
+TAIL_CHARS = 16
+MIN_FLUSH_CHARS = 12
+FLUSH_BOUNDARIES = (" ", "\n", "\t", ",", ".", "?", "!", ";", ":")
 
 
 def _normalize_spaced_acronyms(text: str) -> str:
@@ -66,21 +68,42 @@ def normalize_spoken_text(text: str) -> str:
     return text.strip()
 
 
+def _find_flush_boundary(text: str, limit: int) -> int:
+    limit = min(limit, len(text))
+    boundary = max(text.rfind(character, 0, limit) for character in FLUSH_BOUNDARIES)
+
+    if boundary >= MIN_FLUSH_CHARS - 1:
+        return boundary + 1
+
+    return 0
+
+
+def _normalize_spoken_text_fragment(text: str) -> str:
+    trailing_space = text[-1:].isspace()
+    normalized = normalize_spoken_text(text)
+
+    if normalized and trailing_space:
+        return f"{normalized} "
+
+    return normalized
+
+
 async def normalize_spoken_text_stream(text: AsyncIterable[str]) -> AsyncIterable[str]:
     buffer = ""
 
     async for chunk in text:
         buffer += chunk
-        if len(buffer) <= TAIL_CHARS:
+        if len(buffer) < MIN_FLUSH_CHARS:
             continue
 
-        normalized = normalize_spoken_text(buffer)
-        flush_to = max(0, len(normalized) - TAIL_CHARS)
-        if flush_to:
-            yield normalized[:flush_to]
-            buffer = normalized[flush_to:]
+        if len(buffer) <= TAIL_CHARS:
+            flush_to = _find_flush_boundary(buffer, len(buffer))
         else:
-            buffer = normalized
+            flush_to = _find_flush_boundary(buffer, len(buffer) - TAIL_CHARS)
+
+        if flush_to:
+            yield _normalize_spoken_text_fragment(buffer[:flush_to])
+            buffer = buffer[flush_to:]
 
     if buffer:
         yield normalize_spoken_text(buffer)

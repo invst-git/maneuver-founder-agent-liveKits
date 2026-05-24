@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from dotenv import load_dotenv
 
 from livekit import agents
@@ -18,10 +20,17 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from src.config import get_settings
 from src.call_control import EndCallManager, LiveKitRoomCloser
+from src.email_followup import EmailFollowupService
 from src.lead_capture import LeadProfile
 from src.lead_store import LeadStore
 from src.prompts import FOUNDER_AGENT_PROMPT, OPENING_GREETING
-from src.ui_bridge import ManeuverUiBridge, clean_lead_field_updates, normalize_lead_field
+from src.ui_bridge import (
+    MANEUVER_UI_INPUT_TOPIC,
+    ManeuverUiBridge,
+    clean_lead_field_updates,
+    normalize_lead_field,
+    parse_ui_input_event,
+)
 from src.voice_config import build_tts, build_tts_text_transforms, build_turn_handling
 
 
@@ -38,11 +47,13 @@ class ManeuverFounderAgent(Agent):
         store: LeadStore,
         ui_bridge: ManeuverUiBridge,
         end_call_manager: EndCallManager,
+        email_followup: EmailFollowupService,
     ):
         self.lead = lead
         self.store = store
         self.ui_bridge = ui_bridge
         self.end_call_manager = end_call_manager
+        self.email_followup = email_followup
 
         super().__init__(
             instructions=FOUNDER_AGENT_PROMPT,
@@ -100,6 +111,9 @@ class ManeuverFounderAgent(Agent):
             "next_step": next_step,
         }
         ui_updates = clean_lead_field_updates(lead_fields)
+        previous_values = {
+            field_name: getattr(self.lead, field_name, None) for field_name in ui_updates
+        }
 
         self.lead.update(
             **lead_fields,
@@ -107,6 +121,16 @@ class ManeuverFounderAgent(Agent):
 
         if note:
             self.lead.add_note(note)
+
+        for field_name, value in ui_updates.items():
+            already_reviewed = self.lead.field_statuses.get(field_name) in {
+                "confirmed",
+                "corrected",
+            }
+            if already_reviewed and previous_values.get(field_name) == value:
+                continue
+
+            self.lead.set_field_status(field_name, "pending")
 
         await self.ui_bridge.update_lead_fields(ui_updates)
 
@@ -153,7 +177,14 @@ class ManeuverFounderAgent(Agent):
                 "reason": "empty_value",
             }
 
+        previous_value = getattr(self.lead, canonical_field, None)
         self.lead.update(**updates)
+        already_reviewed = self.lead.field_statuses.get(canonical_field) in {
+            "confirmed",
+            "corrected",
+        }
+        if not already_reviewed or previous_value != updates[canonical_field]:
+            self.lead.set_field_status(canonical_field, "pending")
         ui_result = await self.ui_bridge.update_lead_field(canonical_field, updates[canonical_field])
 
         saved = False
@@ -191,6 +222,12 @@ class ManeuverFounderAgent(Agent):
         return await self.ui_bridge.show_process_diagram()
 
     @function_tool()
+    async def show_workflow_diagram(self, context: RunContext) -> dict:
+        """Show a workflow diagram on the frontend before answering workflow or diagram requests."""
+
+        return await self.ui_bridge.show_workflow_diagram()
+
+    @function_tool()
     async def show_default_view(self, context: RunContext) -> dict:
         """Reset the frontend visual panel to the default call view."""
 
@@ -207,8 +244,6 @@ class ManeuverFounderAgent(Agent):
         Use this when the user says they are done, wants to end the call,
         asks to save the details, asks to send the details, or asks for a summary.
         """
-
-        context.disallow_interruptions()
 
         if not self.lead.is_persistable():
             return {
@@ -249,13 +284,47 @@ class ManeuverFounderAgent(Agent):
             self.store.upsert_lead(self.lead.to_lead_record(), event="end_call")
             saved = True
 
+        email_result = await self.email_followup.send_followup(self.lead)
         end_state = self.end_call_manager.request_end_call(reason)
 
         return {
             **end_state,
             "saved": saved,
+            "email": email_result,
             "lead_id": self.lead.lead_id,
             "qualification": self.lead.qualification,
+        }
+
+    async def apply_ui_input_event(self, event: dict) -> dict:
+        action = event.get("action")
+        payload = event.get("payload") or {}
+        field = normalize_lead_field(str(payload.get("field", "")))
+        value = payload.get("value")
+
+        if field is None or not isinstance(value, str) or not value.strip():
+            return {
+                "applied": False,
+                "reason": "invalid_payload",
+            }
+
+        status = "confirmed" if action == "confirm_lead_field" else "corrected"
+        cleaned_value = value.strip()
+        self.lead.update(**{field: cleaned_value})
+        self.lead.set_field_status(field, status)
+        ui_result = await self.ui_bridge.update_lead_field(field, cleaned_value, status=status)
+
+        saved = False
+        if self.lead.is_persistable():
+            self.store.upsert_lead(self.lead.to_lead_record(), event=action)
+            saved = True
+
+        return {
+            "applied": True,
+            "saved": saved,
+            "sent": ui_result.get("sent", False),
+            "field": field,
+            "status": status,
+            "lead_id": self.lead.lead_id,
         }
 
 
@@ -268,6 +337,7 @@ async def maneuver_agent(ctx: agents.JobContext):
         transcript_debug_enabled=settings.transcript_debug_enabled,
     )
     ui_bridge = ManeuverUiBridge(ctx.room)
+    email_followup = EmailFollowupService(settings)
     end_call_manager = EndCallManager(
         LiveKitRoomCloser(
             settings=settings,
@@ -281,14 +351,34 @@ async def maneuver_agent(ctx: agents.JobContext):
 
     ctx.add_shutdown_callback(save_on_shutdown)
 
+    agent = ManeuverFounderAgent(
+        lead=lead,
+        store=store,
+        ui_bridge=ui_bridge,
+        end_call_manager=end_call_manager,
+        email_followup=email_followup,
+    )
+
+    @ctx.room.on("data_received")
+    def on_data_received(packet):
+        if packet.topic != MANEUVER_UI_INPUT_TOPIC:
+            return
+
+        event = parse_ui_input_event(packet.data)
+        if event is None:
+            return
+
+        asyncio.create_task(agent.apply_ui_input_event(event))
+
     session = AgentSession(
         stt="deepgram/nova-3:multi",
         llm="openai/gpt-4.1-mini",
         tts=build_tts(settings),
         vad=silero.VAD.load(),
         turn_handling=build_turn_handling(turn_detection=MultilingualModel()),
-        use_tts_aligned_transcript=True,
+        use_tts_aligned_transcript=False,
         tts_text_transforms=build_tts_text_transforms(),
+        aec_warmup_duration=0.5,
     )
 
     @session.on("conversation_item_added")
@@ -315,16 +405,12 @@ async def maneuver_agent(ctx: agents.JobContext):
 
     await session.start(
         room=ctx.room,
-        agent=ManeuverFounderAgent(
-            lead=lead,
-            store=store,
-            ui_bridge=ui_bridge,
-            end_call_manager=end_call_manager,
-        ),
+        agent=agent,
     )
 
     await session.generate_reply(
         instructions=OPENING_GREETING,
+        allow_interruptions=True,
     )
 
 

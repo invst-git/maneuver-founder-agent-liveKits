@@ -1,4 +1,5 @@
 export const MANEUVER_UI_TOPIC = 'maneuver.ui';
+export const MANEUVER_UI_INPUT_TOPIC = 'maneuver.ui.input';
 
 export const SERVICES = [
   {
@@ -58,6 +59,29 @@ export const PROCESS_STEPS = [
   },
 ] as const;
 
+export const WORKFLOW_STEPS = [
+  {
+    id: 'discover',
+    title: 'Discover',
+    body: 'Capture the workflow, tools, owner, volume, and failure points.',
+  },
+  {
+    id: 'design',
+    title: 'Design',
+    body: 'Map the human handoffs, AI decisions, integrations, and fallback paths.',
+  },
+  {
+    id: 'build',
+    title: 'Build',
+    body: 'Ship the smallest useful workflow with real data and business-system actions.',
+  },
+  {
+    id: 'improve',
+    title: 'Improve',
+    body: 'Measure outcomes, tighten prompts and automations, then expand the workflow.',
+  },
+] as const;
+
 export const LEAD_FIELDS = [
   { id: 'name', label: 'Name' },
   { id: 'role', label: 'Role' },
@@ -81,15 +105,19 @@ export const LEAD_FIELDS = [
 
 export type ServiceId = (typeof SERVICES)[number]['id'];
 export type LeadField = (typeof LEAD_FIELDS)[number]['id'];
+export type LeadFieldStatus = 'pending' | 'confirmed' | 'corrected';
 
-export type VisualMode = 'default' | 'services' | 'service_detail' | 'process';
+export type VisualMode = 'default' | 'services' | 'service_detail' | 'process' | 'workflow';
 
 export type ManeuverUiActionName =
   | 'show_services_slide'
   | 'show_service_detail'
   | 'show_process_diagram'
+  | 'show_workflow_diagram'
   | 'show_default_view'
   | 'update_lead_field';
+
+export type ManeuverUiInputActionName = 'confirm_lead_field' | 'correct_lead_field';
 
 export interface ManeuverUiAction {
   version: 1;
@@ -99,10 +127,26 @@ export interface ManeuverUiAction {
   created_at?: string;
 }
 
+export interface ManeuverUiInputAction {
+  version: 1;
+  id: string;
+  action: ManeuverUiInputActionName;
+  payload: {
+    field: LeadField;
+    value: string;
+  };
+  created_at?: string;
+}
+
+export interface LeadFieldValue {
+  value: string;
+  status: LeadFieldStatus;
+}
+
 export interface ConversationUiState {
   mode: VisualMode;
   selectedServiceId?: ServiceId;
-  leadFields: Partial<Record<LeadField, string>>;
+  leadFields: Partial<Record<LeadField, LeadFieldValue>>;
   seenEventIds: string[];
   lastUpdatedAt?: string;
 }
@@ -159,6 +203,10 @@ export function isLeadField(value: unknown): value is LeadField {
   return typeof value === 'string' && LEAD_FIELDS.some((field) => field.id === value);
 }
 
+export function isLeadFieldStatus(value: unknown): value is LeadFieldStatus {
+  return value === 'pending' || value === 'confirmed' || value === 'corrected';
+}
+
 export function isManeuverUiAction(value: unknown): value is ManeuverUiAction {
   if (!value || typeof value !== 'object') {
     return false;
@@ -169,6 +217,7 @@ export function isManeuverUiAction(value: unknown): value is ManeuverUiAction {
     'show_services_slide',
     'show_service_detail',
     'show_process_diagram',
+    'show_workflow_diagram',
     'show_default_view',
     'update_lead_field',
   ];
@@ -180,4 +229,47 @@ export function isManeuverUiAction(value: unknown): value is ManeuverUiAction {
     (candidate.payload === undefined ||
       (typeof candidate.payload === 'object' && candidate.payload !== null))
   );
+}
+
+export function detectVisualActionFromText(
+  text: string
+): Pick<ManeuverUiAction, 'action' | 'payload'> | undefined {
+  const normalized = text.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  const wantsDiagram =
+    /\b(diagram|draw|visual|map|flowchart|workflow)\b/.test(normalized) ||
+    normalized.includes('show me how') ||
+    normalized.includes('how does it work');
+
+  if (wantsDiagram && /\b(workflow|flow|map|diagram|how|process)\b/.test(normalized)) {
+    return { action: 'show_workflow_diagram' };
+  }
+
+  if (/\b(process|approach|steps|method)\b/.test(normalized)) {
+    return { action: 'show_process_diagram' };
+  }
+
+  const serviceId = normalizeServiceId(normalized);
+  if (serviceId) {
+    return {
+      action: 'show_service_detail',
+      payload: { service_id: serviceId },
+    };
+  }
+
+  if (
+    normalized.includes('what services') ||
+    normalized.includes('services do you offer') ||
+    normalized.includes('what do you offer') ||
+    normalized.includes('what do you do') ||
+    normalized.includes('capabilities')
+  ) {
+    return { action: 'show_services_slide' };
+  }
+
+  return undefined;
 }

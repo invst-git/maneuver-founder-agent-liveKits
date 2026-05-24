@@ -2,6 +2,7 @@ import {
   type ConversationUiState,
   type ManeuverUiAction,
   isLeadField,
+  isLeadFieldStatus,
   normalizeServiceId,
 } from './types';
 
@@ -67,6 +68,14 @@ export function conversationUiReducer(
         selectedServiceId: undefined,
       };
 
+    case 'show_workflow_diagram':
+      return {
+        ...state,
+        ...eventState,
+        mode: 'workflow',
+        selectedServiceId: undefined,
+      };
+
     case 'show_default_view':
       return {
         ...state,
@@ -78,6 +87,7 @@ export function conversationUiReducer(
     case 'update_lead_field': {
       const field = action.payload?.field;
       const value = action.payload?.value;
+      const payloadStatus = action.payload?.status;
 
       if (!isLeadField(field) || typeof value !== 'string' || !value.trim()) {
         return {
@@ -86,12 +96,25 @@ export function conversationUiReducer(
         };
       }
 
+      const trimmedValue = value.trim();
+      const previousField = state.leadFields[field];
+      const incomingStatus = isLeadFieldStatus(payloadStatus) ? payloadStatus : 'pending';
+      const status =
+        incomingStatus === 'pending' &&
+        previousField?.value === trimmedValue &&
+        previousField.status !== 'pending'
+          ? previousField.status
+          : incomingStatus;
+
       return {
         ...state,
         ...eventState,
         leadFields: {
           ...state.leadFields,
-          [field]: value.trim(),
+          [field]: {
+            value: trimmedValue,
+            status,
+          },
         },
       };
     }

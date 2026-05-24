@@ -7,6 +7,7 @@ from typing import Any
 
 
 MANEUVER_UI_TOPIC = "maneuver.ui"
+MANEUVER_UI_INPUT_TOPIC = "maneuver.ui.input"
 
 LEAD_UI_FIELDS = (
     "name",
@@ -38,6 +39,17 @@ LEAD_FIELD_ALIASES = {
     "desired solution": "desired_solution",
     "success metric": "success_metric",
     "next step": "next_step",
+}
+
+LEAD_FIELD_STATUSES = {
+    "pending",
+    "confirmed",
+    "corrected",
+}
+
+UI_INPUT_ACTIONS = {
+    "confirm_lead_field",
+    "correct_lead_field",
 }
 
 SERVICE_ALIASES = {
@@ -101,6 +113,54 @@ def clean_lead_field_updates(fields: dict[str, Any]) -> dict[str, str]:
         updates[canonical] = str(value)
 
     return updates
+
+
+def normalize_lead_field_status(status: Any, default: str = "pending") -> str:
+    if not isinstance(status, str):
+        return default
+
+    normalized = status.strip().lower()
+    if normalized in LEAD_FIELD_STATUSES:
+        return normalized
+
+    return default
+
+
+def parse_ui_input_event(data: bytes | str) -> dict[str, Any] | None:
+    try:
+        raw = data.decode("utf-8") if isinstance(data, bytes) else data
+        candidate = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        return None
+
+    if not isinstance(candidate, dict) or candidate.get("version") != 1:
+        return None
+
+    action = candidate.get("action")
+    if action not in UI_INPUT_ACTIONS:
+        return None
+
+    payload = candidate.get("payload")
+    if not isinstance(payload, dict):
+        return None
+
+    field = normalize_lead_field(str(payload.get("field", "")))
+    if field is None:
+        return None
+
+    value = payload.get("value")
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    return {
+        "version": 1,
+        "id": str(candidate.get("id") or uuid.uuid4()),
+        "action": action,
+        "payload": {
+            "field": field,
+            "value": value.strip(),
+        },
+    }
 
 
 def make_ui_event(action: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -178,10 +238,18 @@ class ManeuverUiBridge:
     async def show_process_diagram(self) -> dict[str, Any]:
         return await self.emit("show_process_diagram")
 
+    async def show_workflow_diagram(self) -> dict[str, Any]:
+        return await self.emit("show_workflow_diagram")
+
     async def show_default_view(self) -> dict[str, Any]:
         return await self.emit("show_default_view")
 
-    async def update_lead_field(self, field: str, value: str) -> dict[str, Any]:
+    async def update_lead_field(
+        self,
+        field: str,
+        value: str,
+        status: str = "pending",
+    ) -> dict[str, Any]:
         updates = clean_lead_field_updates({field: value})
         if not updates:
             return {
@@ -196,6 +264,7 @@ class ManeuverUiBridge:
             {
                 "field": canonical,
                 "value": cleaned_value,
+                "status": normalize_lead_field_status(status),
             },
         )
 

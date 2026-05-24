@@ -1,18 +1,22 @@
 'use client';
 
-import type { ComponentType } from 'react';
+import { useState, type ComponentType } from 'react';
 import {
   AppWindow,
   BrainCircuit,
   Building2,
+  Check,
   Cable,
   CalendarDays,
   CheckCircle2,
   CircleDot,
   GitBranch,
+  Pencil,
   PhoneCall,
+  Save,
   UserRound,
   Workflow,
+  X,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '@/lib/shadcn/utils';
@@ -20,6 +24,7 @@ import {
   LEAD_FIELDS,
   PROCESS_STEPS,
   SERVICES,
+  WORKFLOW_STEPS,
   type ConversationUiState,
   type LeadField,
   type ServiceId,
@@ -27,6 +32,8 @@ import {
 
 interface ConversationVisualPanelProps {
   state: ConversationUiState;
+  onConfirmLeadField?: (field: LeadField, value: string) => void | Promise<void>;
+  onCorrectLeadField?: (field: LeadField, value: string) => void | Promise<void>;
   className?: string;
 }
 
@@ -60,7 +67,7 @@ function SectionTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
 }
 
 function DefaultStage({ leadFields }: { leadFields: ConversationUiState['leadFields'] }) {
-  const capturedCount = Object.values(leadFields).filter(Boolean).length;
+  const capturedCount = Object.values(leadFields).filter((field) => field?.value).length;
   const metrics = [
     { label: 'Services', value: SERVICES.length },
     { label: 'Process', value: PROCESS_STEPS.length },
@@ -193,6 +200,35 @@ function ProcessStage() {
   );
 }
 
+function WorkflowStage() {
+  return (
+    <motion.div
+      key="workflow"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="space-y-5"
+    >
+      <SectionTitle eyebrow="Workflow" title="From messy process to operating system" />
+      <div className="grid gap-2 sm:grid-cols-2">
+        {WORKFLOW_STEPS.map((step, index) => (
+          <div key={step.id} className="border-border/70 rounded-md border p-3">
+            <div className="flex items-start gap-3">
+              <div className="bg-chart-1/10 text-chart-1 grid size-7 shrink-0 place-items-center rounded-full text-xs font-semibold">
+                {index + 1}
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-foreground text-sm font-semibold">{step.title}</h3>
+                <p className="text-muted-foreground pt-1 text-xs leading-5">{step.body}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
 function VisualStage({ state }: { state: ConversationUiState }) {
   return (
     <div className="min-h-[260px] flex-1 overflow-hidden p-4 md:p-5">
@@ -203,6 +239,7 @@ function VisualStage({ state }: { state: ConversationUiState }) {
           <ServiceDetailStage selectedServiceId={state.selectedServiceId} />
         )}
         {state.mode === 'process' && <ProcessStage />}
+        {state.mode === 'workflow' && <WorkflowStage />}
       </AnimatePresence>
     </div>
   );
@@ -224,11 +261,44 @@ function LeadIcon({ field }: { field: LeadField }) {
   return <CircleDot className="size-3.5" />;
 }
 
-function DiscoveryPanel({ leadFields }: { leadFields: ConversationUiState['leadFields'] }) {
+interface DiscoveryPanelProps {
+  leadFields: ConversationUiState['leadFields'];
+  onConfirmLeadField?: (field: LeadField, value: string) => void | Promise<void>;
+  onCorrectLeadField?: (field: LeadField, value: string) => void | Promise<void>;
+}
+
+function DiscoveryPanel({
+  leadFields,
+  onConfirmLeadField,
+  onCorrectLeadField,
+}: DiscoveryPanelProps) {
+  const [editingField, setEditingField] = useState<LeadField | null>(null);
+  const [draftValue, setDraftValue] = useState('');
   const orderedFields = [
     ...priorityLeadFields,
     ...LEAD_FIELDS.map((field) => field.id).filter((field) => !priorityLeadFields.includes(field)),
   ];
+  const capturedCount = Object.values(leadFields).filter((field) => field?.value).length;
+
+  const startEditing = (field: LeadField, value: string) => {
+    setEditingField(field);
+    setDraftValue(value);
+  };
+
+  const cancelEditing = () => {
+    setEditingField(null);
+    setDraftValue('');
+  };
+
+  const saveCorrection = async (field: LeadField) => {
+    const trimmedValue = draftValue.trim();
+    if (!trimmedValue) {
+      return;
+    }
+
+    await onCorrectLeadField?.(field, trimmedValue);
+    cancelEditing();
+  };
 
   return (
     <div className="border-border/70 min-h-0 border-t p-4 md:p-5">
@@ -238,7 +308,7 @@ function DiscoveryPanel({ leadFields }: { leadFields: ConversationUiState['leadF
           <h2 className="text-foreground text-sm font-semibold">Discovery</h2>
         </div>
         <p className="text-muted-foreground text-xs font-medium">
-          {Object.values(leadFields).filter(Boolean).length} captured
+          {capturedCount} captured
         </p>
       </div>
 
@@ -249,13 +319,16 @@ function DiscoveryPanel({ leadFields }: { leadFields: ConversationUiState['leadF
             return null;
           }
 
-          const value = leadFields[field.id];
+          const leadField = leadFields[field.id];
+          const value = leadField?.value ?? '';
+          const isEditing = editingField === field.id;
+          const status = leadField?.status ?? 'pending';
 
           return (
             <div
               key={field.id}
               className={cn(
-                'grid grid-cols-[18px_minmax(82px,0.45fr)_minmax(0,1fr)] items-start gap-2 rounded-md border px-2.5 py-2',
+                'grid grid-cols-[18px_minmax(78px,0.38fr)_minmax(0,1fr)] items-start gap-2 rounded-md border px-2.5 py-2',
                 value
                   ? 'border-chart-2/35 bg-chart-2/10'
                   : 'border-border/60 bg-muted/20 text-muted-foreground'
@@ -265,14 +338,85 @@ function DiscoveryPanel({ leadFields }: { leadFields: ConversationUiState['leadF
                 <LeadIcon field={field.id} />
               </div>
               <p className="text-[11px] leading-5 font-medium">{field.label}</p>
-              <p
-                className={cn(
-                  'min-w-0 text-xs leading-5 break-words',
-                  value ? 'text-foreground font-medium' : 'text-muted-foreground'
+              <div className="min-w-0">
+                {isEditing ? (
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <input
+                      value={draftValue}
+                      onChange={(event) => setDraftValue(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          void saveCorrection(field.id);
+                        }
+
+                        if (event.key === 'Escape') {
+                          cancelEditing();
+                        }
+                      }}
+                      className="border-border bg-background text-foreground h-7 min-w-0 flex-1 rounded-md border px-2 text-xs outline-none focus:border-chart-2"
+                      aria-label={`Correct ${field.label}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void saveCorrection(field.id)}
+                      className="border-border text-chart-2 hover:bg-chart-2/10 grid size-7 shrink-0 place-items-center rounded-md border"
+                      aria-label={`Save ${field.label}`}
+                      title="Save"
+                    >
+                      <Save className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEditing}
+                      className="border-border text-muted-foreground hover:bg-muted grid size-7 shrink-0 place-items-center rounded-md border"
+                      aria-label={`Cancel ${field.label}`}
+                      title="Cancel"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex min-w-0 items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className={cn(
+                          'min-w-0 text-xs leading-5 break-words',
+                          value ? 'text-foreground font-medium' : 'text-muted-foreground'
+                        )}
+                      >
+                        {value || 'Pending'}
+                      </p>
+                      {value && (
+                        <p className="text-muted-foreground pt-0.5 text-[10px] font-medium uppercase">
+                          {status}
+                        </p>
+                      )}
+                    </div>
+                    {value && (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => void onConfirmLeadField?.(field.id, value)}
+                          className="border-border text-chart-2 hover:bg-chart-2/10 grid size-7 place-items-center rounded-md border"
+                          aria-label={`Confirm ${field.label}`}
+                          title="Confirm"
+                        >
+                          <Check className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startEditing(field.id, value)}
+                          className="border-border text-muted-foreground hover:bg-muted grid size-7 place-items-center rounded-md border"
+                          aria-label={`Edit ${field.label}`}
+                          title="Edit"
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
-              >
-                {value || 'Pending'}
-              </p>
+              </div>
             </div>
           );
         })}
@@ -281,7 +425,12 @@ function DiscoveryPanel({ leadFields }: { leadFields: ConversationUiState['leadF
   );
 }
 
-export function ConversationVisualPanel({ state, className }: ConversationVisualPanelProps) {
+export function ConversationVisualPanel({
+  state,
+  onConfirmLeadField,
+  onCorrectLeadField,
+  className,
+}: ConversationVisualPanelProps) {
   return (
     <aside
       className={cn(
@@ -290,7 +439,11 @@ export function ConversationVisualPanel({ state, className }: ConversationVisual
       )}
     >
       <VisualStage state={state} />
-      <DiscoveryPanel leadFields={state.leadFields} />
+      <DiscoveryPanel
+        leadFields={state.leadFields}
+        onConfirmLeadField={onConfirmLeadField}
+        onCorrectLeadField={onCorrectLeadField}
+      />
     </aside>
   );
 }

@@ -181,8 +181,14 @@ export function AgentSessionView_01({
   const { messages } = useSessionMessages(session);
   const [chatOpen, setChatOpen] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const lastVisualIntentKeyRef = useRef<string>('');
   const { state: agentState } = useAgent();
-  const { state: conversationUiState } = useConversationUi();
+  const {
+    state: conversationUiState,
+    confirmLeadField,
+    correctLeadField,
+    showVisualForUserText,
+  } = useConversationUi();
 
   const controls: AgentControlBarControls = {
     leave: true,
@@ -200,6 +206,27 @@ export function AgentSessionView_01({
       scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    const lastMessage = messages.at(-1);
+    const isUserMessage =
+      lastMessage?.type === 'userTranscript' || lastMessage?.from?.isLocal === true;
+    const messageText =
+      typeof lastMessage?.message === 'string' ? lastMessage.message.trim() : '';
+
+    if (!lastMessage || !isUserMessage || !messageText) {
+      return;
+    }
+
+    const intentKey = `${lastMessage.id}:${messageText}`;
+    if (lastVisualIntentKeyRef.current === intentKey) {
+      return;
+    }
+
+    if (showVisualForUserText(messageText)) {
+      lastVisualIntentKeyRef.current = intentKey;
+    }
+  }, [messages, showVisualForUserText]);
 
   return (
     <section
@@ -280,6 +307,8 @@ export function AgentSessionView_01({
 
       <ConversationVisualPanel
         state={conversationUiState}
+        onConfirmLeadField={confirmLeadField}
+        onCorrectLeadField={correctLeadField}
         className="min-h-0 border-t md:border-t-0 md:border-l"
       />
     </section>

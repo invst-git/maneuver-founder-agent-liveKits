@@ -39,6 +39,15 @@ class LeadProfileTests(unittest.TestCase):
         self.assertIn("email", record)
         self.assertNotIn("transcript", record)
 
+    def test_lead_record_keeps_field_confirmation_statuses(self):
+        lead = LeadProfile()
+        lead.update(email="founder@example.com")
+        lead.set_field_status("email", "confirmed")
+
+        record = lead.to_lead_record()
+
+        self.assertEqual(record["field_statuses"], {"email": "confirmed"})
+
 
 class LeadStoreTests(unittest.TestCase):
     def test_upsert_keeps_one_record_per_lead_id(self):
