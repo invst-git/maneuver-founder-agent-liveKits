@@ -44,6 +44,17 @@ SMTP_USERNAME=apikey
 SMTP_PASSWORD=your_sendgrid_api_key
 SMTP_USE_TLS=true
 EMAIL_FROM=your_verified_sender@yourdomain.com
+Optional follow-up email settings, only needed when `FOLLOWUP_EMAIL_ENABLED=true`:
+
+```env
+FOLLOWUP_EMAIL_ENABLED=true
+SMTP_HOST=smtp.your-provider.com
+SMTP_PORT=587
+SMTP_USERNAME=your_smtp_username
+SMTP_PASSWORD=your_smtp_password
+SMTP_USE_TLS=true
+EMAIL_FROM=hello@yourdomain.com
+>>>>>>> 42600c3dd84d43f7b2145eb0072f43cfde3aeaeb
 INTERNAL_LEAD_EMAIL=leads@yourdomain.com
 ```
 
@@ -96,6 +107,9 @@ pnpm exec tsc --noEmit --pretty false
 - **Silero VAD**: local voice activity detection for when the user starts and stops speaking. It is lightweight and works well for realtime turn handling.
 - **LiveKit multilingual turn detector**: improves end-of-turn detection beyond basic silence checks, which helps prevent the agent from jumping in too early or waiting too long.
 - **Twilio SendGrid over SMTP for follow-up email**: the app sends real post-call follow-up emails through SendGrid's SMTP relay (`smtp.sendgrid.net`, username `apikey`, password as the SendGrid API key). This keeps the implementation simple and still lets the provider be swapped later because the app only depends on SMTP settings.
+
+- **SMTP provider from env**: follow-up email is provider-agnostic. SendGrid, Postmark, Mailgun, Gmail app passwords, or any SMTP-compatible provider can be used.
+
 - **Local JSONL storage**: simple local persistence for leads while iterating. It stores compact lead data and confirmation status, not full lead snapshots or transcripts.
 
 ## What I Would Do Next With One More Week
