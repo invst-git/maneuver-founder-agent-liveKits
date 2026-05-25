@@ -148,13 +148,13 @@ Example saved lead:
 }
 ```
 
-Image placeholders:
 
-![Email follow-up sent to the customer]
+
+### Email follow-up sent to the customer
 <img width="1919" height="843" alt="Screenshot 2026-05-25 101948" src="https://github.com/user-attachments/assets/d36e1289-f1b0-4314-b705-d31565e3cdca" />
 
 
-![Call details and summary sent to the founder's office]
+### Call details and summary sent to the founder's office
 <img width="1919" height="970" alt="Screenshot 2026-05-25 101908" src="https://github.com/user-attachments/assets/084f4a8d-d700-4a58-8e7a-d0ee6348886b" />
 
 ## What I Would Do Next With One More Week
