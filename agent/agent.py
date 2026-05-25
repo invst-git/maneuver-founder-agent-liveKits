@@ -234,6 +234,33 @@ class ManeuverFounderAgent(Agent):
         return await self.ui_bridge.show_default_view()
 
     @function_tool()
+    async def get_next_discovery_question(
+        self,
+        context: RunContext,
+        for_wrap_up: bool = False,
+    ) -> dict:
+        """Return the next single discovery question to ask.
+
+        Call this after capturing useful user information, and before wrapping
+        up if the visitor wants to end while important fields are missing.
+        Ask only the returned question, not a batch of questions.
+        """
+
+        next_question = self.lead.next_missing_discovery_field(for_wrap_up=for_wrap_up)
+        if next_question is None:
+            return {
+                "complete": True,
+                "minimum_discovery_complete": self.lead.has_minimum_discovery(),
+                "message": "No missing discovery fields remain.",
+            }
+
+        return {
+            "complete": False,
+            "minimum_discovery_complete": self.lead.has_minimum_discovery(),
+            **next_question,
+        }
+
+    @function_tool()
     async def save_lead(
         self,
         context: RunContext,
@@ -269,12 +296,25 @@ class ManeuverFounderAgent(Agent):
         self,
         context: RunContext,
         reason: str = "customer_requested_end_call",
+        force: bool = False,
     ) -> dict:
         """End the call after a short goodbye.
 
         Use this when the visitor clearly wants to leave, says goodbye, says
         they are done, asks to end the call, or says they have no more questions.
         """
+
+        if not force:
+            next_question = self.lead.next_missing_discovery_field(for_wrap_up=True)
+            if next_question and next_question["required_before_wrap_up"]:
+                return {
+                    "ending_call": False,
+                    "requires_more_info": True,
+                    "minimum_discovery_complete": self.lead.has_minimum_discovery(),
+                    "reason": "missing_required_discovery_field",
+                    **next_question,
+                    "message": "Ask this one question before ending. If the visitor declines, call end_call again with force=true.",
+                }
 
         context.disallow_interruptions()
 

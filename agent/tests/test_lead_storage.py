@@ -48,6 +48,61 @@ class LeadProfileTests(unittest.TestCase):
 
         self.assertEqual(record["field_statuses"], {"email": "confirmed"})
 
+    def test_next_missing_discovery_field_starts_with_identity(self):
+        lead = LeadProfile()
+
+        next_question = lead.next_missing_discovery_field()
+
+        self.assertEqual(next_question["field"], "name")
+        self.assertTrue(next_question["required_before_wrap_up"])
+
+    def test_next_missing_discovery_field_progresses_to_company_then_problem(self):
+        lead = LeadProfile()
+        lead.update(name="Asha")
+
+        self.assertEqual(lead.next_missing_discovery_field()["field"], "company")
+
+        lead.update(company="Example Co", role="Founder")
+
+        self.assertEqual(lead.next_missing_discovery_field()["field"], "problem")
+
+    def test_minimum_discovery_requires_contact_method(self):
+        lead = LeadProfile()
+        lead.update(
+            name="Asha",
+            company="Example Co",
+            problem="Manual follow-up is slow",
+            timeline="This quarter",
+        )
+
+        self.assertFalse(lead.has_minimum_discovery())
+        self.assertEqual(lead.next_missing_discovery_field(for_wrap_up=True)["field"], "email")
+
+        lead.update(email="asha@example.com")
+
+        self.assertTrue(lead.has_minimum_discovery())
+
+    def test_wrap_up_prioritizes_contact_over_lower_priority_fields(self):
+        lead = LeadProfile()
+        lead.update(
+            name="Asha",
+            company="Example Co",
+            role="Founder",
+            problem="Manual follow-up is slow",
+            current_workflow="Spreadsheet tracking",
+            current_tools="Sheets and WhatsApp",
+            desired_solution="Automated follow-up",
+            timeline="This quarter",
+            budget="Not sure",
+            decision_maker="I decide",
+            success_metric="Faster response time",
+        )
+
+        next_question = lead.next_missing_discovery_field(for_wrap_up=True)
+
+        self.assertEqual(next_question["field"], "email")
+        self.assertTrue(next_question["required_before_wrap_up"])
+
 
 class LeadStoreTests(unittest.TestCase):
     def test_upsert_keeps_one_record_per_lead_id(self):
