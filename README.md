@@ -44,17 +44,6 @@ SMTP_USERNAME=apikey
 SMTP_PASSWORD=your_sendgrid_api_key
 SMTP_USE_TLS=true
 EMAIL_FROM=your_verified_sender@yourdomain.com
-Optional follow-up email settings, only needed when `FOLLOWUP_EMAIL_ENABLED=true`:
-
-```env
-FOLLOWUP_EMAIL_ENABLED=true
-SMTP_HOST=smtp.your-provider.com
-SMTP_PORT=587
-SMTP_USERNAME=your_smtp_username
-SMTP_PASSWORD=your_smtp_password
-SMTP_USE_TLS=true
-EMAIL_FROM=hello@yourdomain.com
->>>>>>> 42600c3dd84d43f7b2145eb0072f43cfde3aeaeb
 INTERNAL_LEAD_EMAIL=leads@yourdomain.com
 ```
 
@@ -107,10 +96,63 @@ pnpm exec tsc --noEmit --pretty false
 - **Silero VAD**: local voice activity detection for when the user starts and stops speaking. It is lightweight and works well for realtime turn handling.
 - **LiveKit multilingual turn detector**: improves end-of-turn detection beyond basic silence checks, which helps prevent the agent from jumping in too early or waiting too long.
 - **Twilio SendGrid over SMTP for follow-up email**: the app sends real post-call follow-up emails through SendGrid's SMTP relay (`smtp.sendgrid.net`, username `apikey`, password as the SendGrid API key). This keeps the implementation simple and still lets the provider be swapped later because the app only depends on SMTP settings.
-
-- **SMTP provider from env**: follow-up email is provider-agnostic. SendGrid, Postmark, Mailgun, Gmail app passwords, or any SMTP-compatible provider can be used.
-
 - **Local JSONL storage**: simple local persistence for leads while iterating. It stores compact lead data and confirmation status, not full lead snapshots or transcripts.
+
+## Saved Lead Record And Follow-Up Outputs
+
+Example saved lead:
+
+```json
+{
+  "lead_id": "ca3bbffc-87bf-4d1b-99c3-2fb9dabbcb38",
+  "created_at": "2026-05-25T04:41:24.700638+00:00",
+  "updated_at": "2026-05-25T04:45:38.300576+00:00",
+  "name": "Nitish",
+  "role": "Founder and CEO",
+  "company": "Northstar Ops",
+  "website": null,
+  "email": "invst.zero@gmail.com",
+  "phone": null,
+  "location": null,
+  "industry": null,
+  "company_size": null,
+  "problem": "manual lead follow-up after sales calls",
+  "current_workflow": "manual call traversal and follow-up email sending",
+  "current_tools": "manual tracking and Gmail",
+  "desired_solution": null,
+  "timeline": "this quarter (Q2) to implement solution.",
+  "budget": "No fixed budget, open to invest if it saves real sales time",
+  "decision_maker": "Founder and CEO, self decision maker",
+  "success_metric": "Reply every qualified lead within five minutes.",
+  "next_step": null,
+  "qualification": "hot",
+  "field_statuses": {
+    "company": "corrected",
+    "problem": "confirmed",
+    "current_workflow": "confirmed",
+    "current_tools": "confirmed",
+    "timeline": "confirmed",
+    "decision_maker": "confirmed",
+    "success_metric": "confirmed",
+    "budget": "pending",
+    "name": "confirmed",
+    "email": "confirmed",
+    "role": "pending"
+  },
+  "notes": [
+    "No fixed timeline but want solution within this quarter",
+    "No fixed timeline but want solution within this quarter",
+    "Lead saved. Reason: Lead info complete from discovery call",
+    "Call ended by customer intent. Reason: User said thank you"
+  ]
+}
+```
+
+Image placeholders:
+
+![Email follow-up sent to the customer](docs/images/email-followup-customer.png)
+
+![Call details and summary sent to the founder's office](docs/images/founder-call-summary.png)
 
 ## What I Would Do Next With One More Week
 
